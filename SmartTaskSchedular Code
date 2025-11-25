@@ -1,0 +1,251 @@
+package smarttaskscheduler;
+import javafx.application.Application;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
+
+import java.io.*;
+import java.util.*;
+
+public class SmartTaskSchedulerGUI extends Application {
+    private static final String FILE_NAME = System.getProperty("user.home") + "/Desktop/tasks.dat";
+    private static final String TEXT_FILE_NAME = System.getProperty("user.home") + "/Desktop/tasks.txt";
+
+    private Map<String, MyTask> taskMap = new HashMap<>();
+    private ListView<String> taskList = new ListView<>();
+    private ListView<String> executionOrderList = new ListView<>();
+
+    public static void main(String[] args) {
+        launch(args);
+    }
+
+    @Override
+    public void start(Stage primaryStage) {
+        // Load saved tasks if available
+        loadTasksFromFile();
+
+        // Input fields
+        TextField nameField = new TextField();
+        nameField.setPromptText("Task Name");
+
+        TextField urgencyField = new TextField();
+        urgencyField.setPromptText("Urgency (1-10)");
+
+        TextField importanceField = new TextField();
+        importanceField.setPromptText("Importance (1-10)");
+
+        TextField deadlineField = new TextField();
+        deadlineField.setPromptText("Deadline (days)");
+
+        // Add Task button
+        Button addButton = new Button("➕ Add Task");
+        addButton.setOnAction(e -> {
+            try {
+                String name = nameField.getText();
+                int urgency = Integer.parseInt(urgencyField.getText());
+                int importance = Integer.parseInt(importanceField.getText());
+                int deadline = Integer.parseInt(deadlineField.getText());
+
+                MyTask task = new MyTask(name, urgency, importance, deadline);
+                taskMap.put(name, task);
+                taskList.getItems().add(name);
+
+                nameField.clear();
+                urgencyField.clear();
+                importanceField.clear();
+                deadlineField.clear();
+
+                saveTasksToFile(); // Save both .dat and .txt
+                updateExecutionOrder();
+            } catch (NumberFormatException ex) {
+                showAlert("Invalid input", "Please enter valid numbers for urgency, importance, and deadline.");
+            }
+        });
+
+        // Delete Task button
+        Button deleteButton = new Button("❌ Delete Task");
+        deleteButton.setOnAction(e -> {
+            String selected = taskList.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                taskMap.remove(selected);
+                taskList.getItems().remove(selected);
+                saveTasksToFile(); // Save updated task list
+                updateExecutionOrder();
+            }
+        });
+
+        // Search field and button
+        TextField searchField = new TextField();
+        searchField.setPromptText("Search Task");
+
+        Button searchButton = new Button("🔍 Search");
+        searchButton.setOnAction(e -> {
+            String query = searchField.getText().toLowerCase();
+            taskList.getItems().clear();
+            for (String name : taskMap.keySet()) {
+                if (name.toLowerCase().contains(query)) {
+                    taskList.getItems().add(name);
+                }
+            }
+        });
+
+        // ✅ View All Tasks Button
+        Button viewTasksButton = new Button("📋 View All Tasks");
+        viewTasksButton.setOnAction(e -> viewAllTasks());
+
+        // Buttons layout
+        VBox buttons = new VBox(10, addButton, deleteButton);
+        buttons.setSpacing(10);
+
+        VBox root = new VBox(10);
+        root.getChildren().addAll(
+                new Label("Enter Task Details:"),
+                nameField, urgencyField, importanceField, deadlineField,
+                buttons,
+                taskList,
+                new Separator(),
+                new Label("🔎 Search Tasks:"),
+                searchField,
+                searchButton,
+                viewTasksButton, // Add view button to layout
+                new Separator(),
+                new Label("✅ Scheduled Task Order:"),
+                executionOrderList
+        );
+
+        primaryStage.setScene(new Scene(root, 500, 600));
+        primaryStage.setTitle("🧠 Smart Task Scheduler");
+        primaryStage.show();
+
+        // Populate UI with loaded tasks
+        taskList.getItems().addAll(taskMap.keySet());
+        updateExecutionOrder();
+    }
+
+    // Show an alert dialog
+    private void showAlert(String title, String message) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
+    }
+
+    // ✅ View all tasks in a popup dialog
+    private void viewAllTasks() {
+        if (taskMap.isEmpty()) {
+            showAlert("📭 No Tasks", "There are no tasks saved.");
+            return;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (MyTask task : taskMap.values()) {
+            sb.append("🔹 ").append(task.name)
+                    .append(" | Urgency: ").append(task.urgency)
+                    .append(", Importance: ").append(task.importance)
+                    .append(", Deadline: ").append(task.deadlineDays).append(" days\n");
+        }
+
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("📋 All Tasks");
+        alert.setHeaderText("Saved Tasks:");
+        alert.setContentText(sb.toString());
+        alert.getDialogPane().setPrefWidth(450);
+        alert.showAndWait();
+    }
+
+    // ✅ Save tasks to binary file (.dat) and readable file (.txt)
+    private void saveTasksToFile() {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(FILE_NAME))) {
+            out.writeObject(taskMap);
+        } catch (IOException e) {
+            System.err.println("Error saving tasks: " + e.getMessage());
+        }
+
+        // Save a readable version
+        try (PrintWriter writer = new PrintWriter(new FileWriter(TEXT_FILE_NAME))) {
+            for (MyTask task : taskMap.values()) {
+                writer.println("Task: " + task.name +
+                        " | Urgency: " + task.urgency +
+                        ", Importance: " + task.importance +
+                        ", Deadline: " + task.deadlineDays + " days");
+            }
+        } catch (IOException e) {
+            System.err.println("Error writing to tasks.txt: " + e.getMessage());
+        }
+    }
+
+    // Load tasks from binary file
+    private void loadTasksFromFile() {
+        File file = new File(FILE_NAME);
+        if (!file.exists()) return;
+
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(file))) {
+            taskMap = (Map<String, MyTask>) in.readObject();
+        } catch (IOException | ClassNotFoundException e) {
+            System.err.println("Error loading tasks: " + e.getMessage());
+        }
+    }
+
+    // Sort and display tasks by urgency + importance - deadline
+    private void updateExecutionOrder() {
+        PriorityQueue<MyTask> pq = new PriorityQueue<>(Comparator.comparingInt(MyTask::priorityScore).reversed());
+        pq.addAll(taskMap.values());
+
+        executionOrderList.getItems().clear();
+        while (!pq.isEmpty()) {
+            MyTask task = pq.poll();
+            executionOrderList.getItems().add(task.name + " (Score: " + task.priorityScore() + ")");
+        }
+    }
+}
+package smarttaskscheduler;
+import java.io.Serializable;
+
+public class MyTask implements Serializable {
+    String name;
+    int urgency;
+    int importance;
+    int deadlineDays;
+
+    public MyTask(String name, int urgency, int importance, int deadlineDays) {
+        this.name = name;
+        this.urgency = urgency;
+        this.importance = importance;
+        this.deadlineDays = deadlineDays;
+    }
+
+    // Calculate priority score (customizable)
+    public int priorityScore() {
+        return urgency + importance - deadlineDays;
+    }
+}
+package smarttaskscheduler;
+
+import java.util.*;
+
+public class Trie {
+    private static class TrieNode {
+        Map<Character, TrieNode> children = new HashMap<>();
+        boolean isEndOfWord = false;
+    }
+
+    private final TrieNode root = new TrieNode();
+
+    public void insert(String word) {
+        TrieNode curr = root;
+        for (char ch : word.toCharArray()) {
+            curr = curr.children.computeIfAbsent(ch, c -> new TrieNode());
+        }
+        curr.isEndOfWord = true;
+    }
+
+    public List<String> searchByPrefix(String prefix) {
+        List<String> result = new ArrayList<>();
+        TrieNode curr = root;
+
+        for (char ch : prefix.toCharArray()) {
+            if (!curr.children.containsKey(ch)) return result;
+            curr = curr.children.get(ch);
+        }
